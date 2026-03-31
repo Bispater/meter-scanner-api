@@ -91,7 +91,7 @@ El `docker-compose.yml` ejecuta automáticamente:
 1. Inicia PostgreSQL
 2. Aplica migraciones
 3. Carga datos de ejemplo (seed_data)
-4. Inicia Gunicorn en el puerto 8000
+4. Inicia Gunicorn en el puerto 8001
 
 ### Acceder
 - API: http://localhost:8001/api/
