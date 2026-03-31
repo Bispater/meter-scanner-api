@@ -52,13 +52,13 @@ python manage.py migrate
 python manage.py seed_data
 
 # 6. Levantar servidor
-python manage.py runserver 8000
+python manage.py runserver 8001
 ```
 
 ### Acceder
-- API: http://localhost:8000/api/
-- Swagger: http://localhost:8000/api/docs/
-- Admin Django: http://localhost:8000/admin/
+- API: http://localhost:8001/api/
+- Swagger: http://localhost:8001/api/docs/
+- Admin Django: http://localhost:8001/admin/
 
 ### Credenciales de prueba
 | Usuario | Contraseña | Rol |
@@ -94,9 +94,9 @@ El `docker-compose.yml` ejecuta automáticamente:
 4. Inicia Gunicorn en el puerto 8000
 
 ### Acceder
-- API: http://localhost:8000/api/
-- Swagger: http://localhost:8000/api/docs/
-- Admin: http://localhost:8000/admin/
+- API: http://localhost:8001/api/
+- Swagger: http://localhost:8001/api/docs/
+- Admin: http://localhost:8001/admin/
 
 ### Detener
 ```bash
@@ -141,7 +141,7 @@ python3 -c "from django.core.management.utils import get_random_secret_key; prin
 
 ```bash
 # Login
-curl -X POST http://localhost:8000/api/auth/login/ \
+curl -X POST http://localhost:8001/api/auth/login/ \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"admin"}'
 
@@ -149,15 +149,15 @@ curl -X POST http://localhost:8000/api/auth/login/ \
 TOKEN="<access_token_del_login>"
 
 # Ver edificios
-curl http://localhost:8000/api/buildings/buildings/ \
+curl http://localhost:8001/api/buildings/buildings/ \
   -H "Authorization: Bearer $TOKEN"
 
 # Ver mediciones
-curl http://localhost:8000/api/measurements/ \
+curl http://localhost:8001/api/measurements/ \
   -H "Authorization: Bearer $TOKEN"
 
 # Crear usuario
-curl -X POST http://localhost:8000/api/accounts/users/ \
+curl -X POST http://localhost:8001/api/accounts/users/ \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"username":"nuevo","password":"1234","first_name":"Nuevo","last_name":"Operador","role":"operator"}'
