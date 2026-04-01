@@ -43,8 +43,8 @@ services:
     ports:
       - "${API_PORT:-8001}:8001"
     volumes:
-      - media_data:/app/media
-      - static_data:/app/staticfiles
+      - ./media:/app/media
+      - ./staticfiles:/app/staticfiles
     networks:
       - hydroscan-network
     command: >
@@ -63,10 +63,6 @@ services:
 
 volumes:
   pgdata:
-    driver: local
-  media_data:
-    driver: local
-  static_data:
     driver: local
 
 networks:
