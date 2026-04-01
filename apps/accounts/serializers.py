@@ -80,12 +80,37 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         return instance
 
 
+class AssignedApartmentSerializer(serializers.Serializer):
+    """Lightweight serializer for assigned apartments (used in /me endpoint)."""
+    id = serializers.IntegerField()
+    meter_id = serializers.CharField()
+    number = serializers.CharField()
+    floor = serializers.IntegerField()
+    tower_name = serializers.CharField(source='tower.name')
+    building_name = serializers.CharField(source='tower.building.name')
+    apartment_info = serializers.SerializerMethodField()
+    qr_data = serializers.SerializerMethodField()
+
+    def get_apartment_info(self, obj):
+        return f'{obj.tower.name} — Depto {obj.number}'
+
+    def get_qr_data(self, obj):
+        import json
+        return json.dumps({
+            'meter_id': obj.meter_id,
+            'apartment_info': f'{obj.tower.name} — Depto {obj.number}',
+            'apartment_id': obj.id,
+        })
+
+
 class MeSerializer(serializers.ModelSerializer):
     """Read-only serializer for the authenticated user's own profile."""
+    assigned_apartments = AssignedApartmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = User
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name',
             'phone', 'role', 'is_active', 'date_joined',
+            'assigned_apartments',
         ]

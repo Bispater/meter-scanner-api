@@ -37,6 +37,9 @@ class UserViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated], url_path='me')
     def me(self, request):
-        """Get current authenticated user profile."""
-        serializer = MeSerializer(request.user)
+        """Get current authenticated user profile with assigned apartments."""
+        user = User.objects.prefetch_related(
+            'assigned_apartments__tower__building',
+        ).get(pk=request.user.pk)
+        serializer = MeSerializer(user)
         return Response(serializer.data)
