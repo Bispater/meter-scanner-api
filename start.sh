@@ -16,6 +16,10 @@ REMOTE_SERVER="${1:-root@srv702740}"
 REMOTE_DIR="${2:-/opt/meter-scanner-api}"
 LOCAL_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Configurar SSH ControlMaster para reutilizar conexión
+SSH_CONTROL_PATH="/tmp/ssh-hydroscan-%r@%h:%p"
+SSH_OPTS="-o ControlMaster=auto -o ControlPath=$SSH_CONTROL_PATH -o ControlPersist=10m"
+
 echo -e "${GREEN}=== HydroScan API - Despliegue Automático ===${NC}"
 echo -e "${YELLOW}Servidor:${NC} $REMOTE_SERVER"
 echo -e "${YELLOW}Directorio remoto:${NC} $REMOTE_DIR"
@@ -37,11 +41,20 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 0
 fi
 
-echo -e "${GREEN}[1/6] Creando directorio remoto...${NC}"
-ssh $REMOTE_SERVER "mkdir -p $REMOTE_DIR"
+# Función para limpiar la conexión SSH al salir
+cleanup() {
+    ssh $SSH_OPTS -O exit $REMOTE_SERVER 2>/dev/null || true
+}
+trap cleanup EXIT
 
-echo -e "${GREEN}[2/6] Sincronizando archivos...${NC}"
+echo -e "${GREEN}[1/6] Estableciendo conexión SSH...${NC}"
+ssh $SSH_OPTS -N -f $REMOTE_SERVER
+
+echo -e "${GREEN}[2/6] Creando directorio remoto y sincronizando archivos...${NC}"
+ssh $SSH_OPTS $REMOTE_SERVER "mkdir -p $REMOTE_DIR"
+
 rsync -avz --progress \
+    -e "ssh $SSH_OPTS" \
     --exclude='.git' \
     --exclude='__pycache__' \
     --exclude='*.pyc' \
@@ -54,18 +67,28 @@ rsync -avz --progress \
     $LOCAL_DIR/ $REMOTE_SERVER:$REMOTE_DIR/
 
 echo -e "${GREEN}[3/6] Copiando archivo de configuración de producción...${NC}"
-scp $LOCAL_DIR/.env.prod $REMOTE_SERVER:$REMOTE_DIR/.env
+scp $SSH_OPTS $LOCAL_DIR/.env.prod $REMOTE_SERVER:$REMOTE_DIR/.env
 
-echo -e "${GREEN}[4/6] Deteniendo contenedores existentes...${NC}"
-ssh $REMOTE_SERVER "cd $REMOTE_DIR && docker-compose -f docker-compose.prod.yml down || true"
-
-echo -e "${GREEN}[5/6] Construyendo y levantando contenedores...${NC}"
-ssh $REMOTE_SERVER "cd $REMOTE_DIR && docker-compose -f docker-compose.prod.yml build --no-cache"
-ssh $REMOTE_SERVER "cd $REMOTE_DIR && docker-compose -f docker-compose.prod.yml up -d"
-
-echo -e "${GREEN}[6/6] Verificando estado de los servicios...${NC}"
-sleep 5
-ssh $REMOTE_SERVER "cd $REMOTE_DIR && docker-compose -f docker-compose.prod.yml ps"
+echo -e "${GREEN}[4/6] Ejecutando despliegue en el servidor...${NC}"
+ssh $SSH_OPTS $REMOTE_SERVER bash << EOF
+    set -e
+    cd $REMOTE_DIR
+    
+    echo "Deteniendo contenedores existentes..."
+    docker-compose -f docker-compose.prod.yml down || true
+    
+    echo "Construyendo imágenes..."
+    docker-compose -f docker-compose.prod.yml build --no-cache
+    
+    echo "Levantando servicios..."
+    docker-compose -f docker-compose.prod.yml up -d
+    
+    echo "Esperando que los servicios inicien..."
+    sleep 5
+    
+    echo "Estado de los servicios:"
+    docker-compose -f docker-compose.prod.yml ps
+EOF
 
 echo ""
 echo -e "${GREEN}=== Despliegue completado ===${NC}"
