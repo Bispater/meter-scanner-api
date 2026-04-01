@@ -8,12 +8,14 @@ class MeasurementSerializer(serializers.ModelSerializer):
     apartment_number = serializers.CharField(source='apartment.number', read_only=True)
     meter_id = serializers.CharField(source='apartment.meter_id', read_only=True)
     operator_name = serializers.SerializerMethodField()
+    photo_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Measurement
         fields = [
-            'id', 'apartment', 'operator', 'reading_value', 'unit',
-            'photo', 'status', 'meter_type',
+            'id', 'apartment', 'operator', 'reading_value', 'ocr_value',
+            'modified_by_user', 'unit',
+            'photo', 'photo_url', 'status', 'meter_type',
             'latitude', 'longitude',
             'captured_at', 'created_at',
             # Read-only enriched fields
@@ -27,12 +29,21 @@ class MeasurementSerializer(serializers.ModelSerializer):
             return obj.operator.get_full_name() or obj.operator.username
         return None
 
+    def get_photo_url(self, obj):
+        if obj.photo:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.photo.url)
+            return obj.photo.url
+        return None
+
 
 class MeasurementCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Measurement
         fields = [
-            'id', 'apartment', 'reading_value', 'unit',
+            'id', 'apartment', 'reading_value', 'ocr_value',
+            'modified_by_user', 'unit',
             'photo', 'status', 'meter_type',
             'latitude', 'longitude', 'captured_at',
         ]

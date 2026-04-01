@@ -29,6 +29,7 @@ services:
       DB_PASSWORD: hydroscan123
       DB_HOST: db
       DB_PORT: "5432"
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     ports:
       - "8001:8001"
     volumes:

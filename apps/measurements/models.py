@@ -26,6 +26,10 @@ class Measurement(models.Model):
         related_name='measurements',
     )
     reading_value = models.DecimalField(max_digits=12, decimal_places=3)
+    ocr_value = models.CharField(max_length=50, blank=True, default='',
+                                 help_text='Valor original detectado por OCR/IA')
+    modified_by_user = models.BooleanField(default=False,
+                                           help_text='True si el operador editó el valor OCR')
     unit = models.CharField(max_length=10, default='m³')
     photo = models.ImageField(upload_to='measurements/%Y/%m/', blank=True, null=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING_REVIEW)
