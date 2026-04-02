@@ -36,6 +36,13 @@ class Measurement(models.Model):
     meter_type = models.CharField(max_length=20, choices=MeterType.choices, default=MeterType.ANALOG)
     latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    cycle = models.ForeignKey(
+        'cycles.MeasurementCycle',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='measurements',
+    )
     captured_at = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
 

@@ -2,6 +2,28 @@ from rest_framework import serializers
 from .models import Measurement
 
 
+def _apartment_queryset():
+    from apps.buildings.models import Apartment
+    return Apartment.objects.all()
+
+
+class _ApartmentPKField(serializers.PrimaryKeyRelatedField):
+    """Custom field with lazy queryset and user-friendly error when apartment no longer exists."""
+
+    def get_queryset(self):
+        return _apartment_queryset()
+
+    def to_internal_value(self, data):
+        try:
+            return super().to_internal_value(data)
+        except serializers.ValidationError:
+            raise serializers.ValidationError(
+                'El departamento escaneado ya no existe en el sistema. '
+                'Es posible que la torre o el departamento hayan sido eliminados. '
+                'Contacte al administrador.'
+            )
+
+
 class MeasurementSerializer(serializers.ModelSerializer):
     tower_name = serializers.CharField(source='apartment.tower.name', read_only=True)
     building_name = serializers.CharField(source='apartment.tower.building.name', read_only=True)
@@ -39,6 +61,8 @@ class MeasurementSerializer(serializers.ModelSerializer):
 
 
 class MeasurementCreateSerializer(serializers.ModelSerializer):
+    apartment = _ApartmentPKField()
+
     class Meta:
         model = Measurement
         fields = [
@@ -48,6 +72,23 @@ class MeasurementCreateSerializer(serializers.ModelSerializer):
             'latitude', 'longitude', 'captured_at',
         ]
         read_only_fields = ['id']
+
+    def validate(self, attrs):
+        apartment = attrs.get('apartment')
+        request = self.context.get('request')
+
+        if apartment and request and request.user.is_authenticated:
+            user = request.user
+            if user.role != 'admin':
+                if not user.assigned_apartments.filter(pk=apartment.pk).exists():
+                    raise serializers.ValidationError({
+                        'apartment': (
+                            'El departamento escaneado no está asignado a su usuario '
+                            'o ha sido eliminado. Contacte al administrador.'
+                        )
+                    })
+
+        return attrs
 
     def create(self, validated_data):
         # Auto-assign the authenticated user as operator
