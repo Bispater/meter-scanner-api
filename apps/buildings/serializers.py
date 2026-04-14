@@ -26,6 +26,24 @@ class TowerCreateSerializer(serializers.ModelSerializer):
         read_only_fields = ['id']
 
 
+class BulkApartmentItemSerializer(serializers.Serializer):
+    number = serializers.CharField(max_length=20)
+    floor = serializers.IntegerField(default=1)
+    meter_id = serializers.CharField(max_length=50)
+
+
+class BulkApartmentSerializer(serializers.Serializer):
+    tower = serializers.PrimaryKeyRelatedField(queryset=Tower.objects.all())
+    apartments = BulkApartmentItemSerializer(many=True)
+
+    def validate_apartments(self, value):
+        if not value:
+            raise serializers.ValidationError("Debe incluir al menos un departamento.")
+        if len(value) > 1000:
+            raise serializers.ValidationError("Máximo 1000 departamentos por solicitud.")
+        return value
+
+
 class BuildingSerializer(serializers.ModelSerializer):
     towers = TowerSerializer(many=True, read_only=True)
     tower_count = serializers.IntegerField(source='towers.count', read_only=True)
