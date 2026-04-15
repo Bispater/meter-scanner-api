@@ -7,7 +7,7 @@ from django.utils import timezone
 from decimal import Decimal
 import random
 
-from apps.accounts.models import User
+from apps.accounts.models import User, Organization
 from apps.buildings.models import Building, Tower, Apartment
 from apps.measurements.models import Measurement
 
@@ -17,6 +17,13 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         self.stdout.write('Seeding data...')
+
+        # ── Organization ──
+        org, _ = Organization.objects.get_or_create(
+            slug='hydroscan',
+            defaults={'name': 'HydroScan'},
+        )
+        self.stdout.write(self.style.SUCCESS(f'  ✓ Organization: {org.name}'))
 
         # ── Users ──
         admin, _ = User.objects.get_or_create(
@@ -29,9 +36,11 @@ class Command(BaseCommand):
                 'role': 'admin',
                 'is_staff': True,
                 'is_superuser': True,
+                'organization': org,
             },
         )
         admin.set_password('admin')
+        admin.organization = org
         admin.save()
 
         jperez, _ = User.objects.get_or_create(
@@ -42,9 +51,11 @@ class Command(BaseCommand):
                 'email': 'jperez@hydroscan.cl',
                 'phone': '+56 9 8765 4321',
                 'role': 'operator',
+                'organization': org,
             },
         )
         jperez.set_password('1234')
+        jperez.organization = org
         jperez.save()
 
         mlopez, _ = User.objects.get_or_create(
@@ -55,9 +66,11 @@ class Command(BaseCommand):
                 'email': 'mlopez@hydroscan.cl',
                 'phone': '+56 9 5555 1234',
                 'role': 'operator',
+                'organization': org,
             },
         )
         mlopez.set_password('1234')
+        mlopez.organization = org
         mlopez.save()
 
         self.stdout.write(self.style.SUCCESS(f'  ✓ Users: admin, jperez, mlopez'))
@@ -65,12 +78,16 @@ class Command(BaseCommand):
         # ── Buildings ──
         bld1, _ = Building.objects.get_or_create(
             name='Edificio Los Robles',
-            defaults={'address': 'Av. Providencia 1234, Santiago'},
+            defaults={'address': 'Av. Providencia 1234, Santiago', 'organization': org},
         )
+        bld1.organization = org
+        bld1.save()
         bld2, _ = Building.objects.get_or_create(
             name='Condominio Parque Central',
-            defaults={'address': 'Calle Las Flores 567, Ñuñoa'},
+            defaults={'address': 'Calle Las Flores 567, Ñuñoa', 'organization': org},
         )
+        bld2.organization = org
+        bld2.save()
 
         # ── Towers ──
         tA, _ = Tower.objects.get_or_create(building=bld1, name='Torre A')

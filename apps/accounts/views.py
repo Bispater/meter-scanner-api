@@ -1,8 +1,11 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import User
-from .serializers import UserSerializer, UserCreateSerializer, UserUpdateSerializer, MeSerializer
+from .models import User, Organization
+from .serializers import (
+    UserSerializer, UserCreateSerializer, UserUpdateSerializer, MeSerializer,
+    OrganizationSerializer,
+)
 
 
 class IsAdminUser(permissions.BasePermission):
@@ -10,13 +13,56 @@ class IsAdminUser(permissions.BasePermission):
         return request.user and request.user.is_authenticated and request.user.role == 'admin'
 
 
+def _managed_org_ids(user):
+    """Returns a set of organization IDs this admin can manage. None = all (superuser)."""
+    if user.is_superuser:
+        return None
+    ids = set()
+    if user.organization_id:
+        ids.add(user.organization_id)
+    ids.update(user.extra_organizations.values_list('id', flat=True))
+    return ids
+
+
+class OrganizationViewSet(viewsets.ModelViewSet):
+    """CRUD for organizations. Superusers see all; admins see only their orgs."""
+    serializer_class = OrganizationSerializer
+    permission_classes = [IsAdminUser]
+
+    def get_queryset(self):
+        user = self.request.user
+        org_ids = _managed_org_ids(user)
+        if org_ids is None:
+            return Organization.objects.all()
+        return Organization.objects.filter(id__in=org_ids)
+
+    def perform_create(self, serializer):
+        org = serializer.save()
+        # Add org to the creating admin's extra_organizations if not their primary
+        user = self.request.user
+        if user.organization_id != org.id:
+            user.extra_organizations.add(org)
+
+
 class UserViewSet(viewsets.ModelViewSet):
-    """CRUD for users. Only admins can manage users."""
-    queryset = User.objects.all()
+    """CRUD for users. Admins can only manage users in their org(s)."""
     permission_classes = [IsAdminUser]
     filterset_fields = ['role', 'is_active']
     search_fields = ['username', 'first_name', 'last_name', 'email']
     ordering_fields = ['date_joined', 'username']
+
+    def get_queryset(self):
+        org_ids = _managed_org_ids(self.request.user)
+        if org_ids is None:
+            return User.objects.all()
+        return User.objects.filter(organization_id__in=org_ids)
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if not serializer.validated_data.get('organization'):
+            serializer.save(organization=user.organization)
+        else:
+            serializer.save()
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -120,6 +166,7 @@ class UserViewSet(viewsets.ModelViewSet):
                 {
                     'id': apt.id,
                     'meter_id': apt.meter_id,
+                    'qr_code': apt.qr_code,
                     'number': apt.number,
                     'floor': apt.floor,
                     'tower_name': apt.tower.name,

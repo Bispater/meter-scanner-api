@@ -2,6 +2,13 @@ from django.db import models
 
 
 class Building(models.Model):
+    organization = models.ForeignKey(
+        'accounts.Organization',
+        on_delete=models.CASCADE,
+        related_name='buildings',
+        null=True,
+        blank=True,
+    )
     name = models.CharField(max_length=200)
     address = models.CharField(max_length=400)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -29,11 +36,27 @@ class Apartment(models.Model):
     tower = models.ForeignKey(Tower, on_delete=models.CASCADE, related_name='apartments')
     number = models.CharField(max_length=20)
     floor = models.IntegerField(default=1)
-    meter_id = models.CharField(max_length=50, unique=True)
+    meter_id = models.CharField(max_length=50, blank=True, default='')
+    qr_code = models.CharField(
+        max_length=50,
+        unique=True,
+        blank=True,
+        help_text='Identificador único del departamento para QR. Formato: NúmeroTorre (ej: 1409A)',
+    )
 
     class Meta:
         ordering = ['floor', 'number']
         unique_together = ['tower', 'number']
 
+    def _generate_qr_code(self):
+        """Build qr_code from apartment number + tower short name (strips 'Torre '/'Torre ')."""
+        short = self.tower.name.replace('Torre ', '').replace('torre ', '').strip()
+        return f'{self.number}{short}'
+
+    def save(self, *args, **kwargs):
+        if not self.qr_code and self.tower_id:
+            self.qr_code = self._generate_qr_code()
+        super().save(*args, **kwargs)
+
     def __str__(self):
-        return f'{self.tower} · Depto {self.number}'
+        return f'{self.tower} · Depto {self.number} [{self.qr_code}]'
