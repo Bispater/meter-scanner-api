@@ -2,6 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db import transaction
+from django.db.models import ProtectedError
 from apps.accounts.views import IsAdminUser, _managed_org_ids
 from .models import Building, Tower, Apartment
 from .serializers import (
@@ -35,6 +36,23 @@ class BuildingViewSet(viewsets.ModelViewSet):
         else:
             serializer.save()
 
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        try:
+            self.perform_destroy(instance)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except ProtectedError:
+            return Response(
+                {
+                    'error': (
+                        'No se puede eliminar el edificio porque tiene ciclos de medición históricos '
+                        'asociados. Cierre o elimine esos ciclos primero.'
+                    ),
+                    'code': 'building_has_protected_cycles',
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
 
 class TowerViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdminUser]
@@ -52,6 +70,22 @@ class TowerViewSet(viewsets.ModelViewSet):
         if self.action in ('create', 'update', 'partial_update'):
             return TowerCreateSerializer
         return TowerSerializer
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        try:
+            self.perform_destroy(instance)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except ProtectedError:
+            return Response(
+                {
+                    'error': (
+                        'No se puede eliminar la torre porque existen datos protegidos relacionados.'
+                    ),
+                    'code': 'tower_has_protected_data',
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
 
 
 class ApartmentViewSet(viewsets.ModelViewSet):
@@ -90,3 +124,19 @@ class ApartmentViewSet(viewsets.ModelViewSet):
 
         out = ApartmentSerializer(created, many=True)
         return Response({'created': len(created), 'apartments': out.data}, status=status.HTTP_201_CREATED)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        try:
+            self.perform_destroy(instance)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except ProtectedError:
+            return Response(
+                {
+                    'error': (
+                        'No se puede eliminar el departamento porque existen datos protegidos relacionados.'
+                    ),
+                    'code': 'apartment_has_protected_data',
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
