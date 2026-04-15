@@ -50,6 +50,7 @@ def ocr_analyze(request):
     POST /api/measurements/ocr/
     Body (multipart/form-data):
         - photo: image file (JPEG/PNG)
+        - meter_reading_type: optional, "A" or "B" (default "A")
     Response:
         { "ocr_value": "12345", "photo_url": "/media/measurements/2025/04/file.jpg" }
     """
@@ -62,9 +63,13 @@ def ocr_analyze(request):
 
     try:
         image_bytes = photo.read()
+        meter_reading_type = request.POST.get('meter_reading_type')
 
         # Run OCR via Gemini
-        ocr_value = ocr_service.recognize_from_bytes(image_bytes)
+        ocr_value = ocr_service.recognize_from_bytes(
+            image_bytes,
+            meter_reading_type=meter_reading_type,
+        )
 
         return Response({
             'ocr_value': ocr_value,

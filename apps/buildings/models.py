@@ -33,10 +33,20 @@ class Tower(models.Model):
 
 
 class Apartment(models.Model):
+    class ReadingLayout(models.TextChoices):
+        A = 'A', 'Tipo A (5 enteros + 4 esferas)'
+        B = 'B', 'Tipo B (8 rodillos + 1 esfera)'
+
     tower = models.ForeignKey(Tower, on_delete=models.CASCADE, related_name='apartments')
     number = models.CharField(max_length=20)
     floor = models.IntegerField(default=1)
     meter_id = models.CharField(max_length=50, blank=True, default='')
+    reading_layout = models.CharField(
+        max_length=1,
+        choices=ReadingLayout.choices,
+        default=ReadingLayout.A,
+        help_text='Disposición de la lectura de 9 dígitos (A o B).',
+    )
     qr_code = models.CharField(
         max_length=50,
         unique=True,
@@ -54,8 +64,17 @@ class Apartment(models.Model):
         return f'{self.number}{short}'
 
     def save(self, *args, **kwargs):
-        if not self.qr_code and self.tower_id:
-            self.qr_code = self._generate_qr_code()
+        if self.tower_id:
+            need_qr = not self.qr_code
+            if self.pk:
+                try:
+                    prev = Apartment.objects.get(pk=self.pk)
+                    if prev.number != self.number or prev.tower_id != self.tower_id:
+                        need_qr = True
+                except Apartment.DoesNotExist:
+                    need_qr = need_qr or not self.qr_code
+            if need_qr:
+                self.qr_code = self._generate_qr_code()
         super().save(*args, **kwargs)
 
     def __str__(self):

@@ -5,7 +5,7 @@ from .models import Building, Tower, Apartment
 class ApartmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Apartment
-        fields = ['id', 'number', 'floor', 'meter_id', 'qr_code', 'tower']
+        fields = ['id', 'number', 'floor', 'meter_id', 'reading_layout', 'qr_code', 'tower']
         read_only_fields = ['id', 'qr_code']
 
 
@@ -30,6 +30,9 @@ class BulkApartmentItemSerializer(serializers.Serializer):
     number = serializers.CharField(max_length=20)
     floor = serializers.IntegerField(default=1)
     meter_id = serializers.CharField(max_length=50, required=False, allow_blank=True, default='')
+    reading_layout = serializers.ChoiceField(
+        choices=['A', 'B'], required=False, default='A',
+    )
 
 
 class BulkApartmentSerializer(serializers.Serializer):

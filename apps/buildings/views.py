@@ -78,7 +78,13 @@ class ApartmentViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             created = []
             for a in items:
-                obj = Apartment(tower=tower, number=a['number'], floor=a['floor'], meter_id=a.get('meter_id', ''))
+                obj = Apartment(
+                    tower=tower,
+                    number=a['number'],
+                    floor=a['floor'],
+                    meter_id=a.get('meter_id', ''),
+                    reading_layout=a.get('reading_layout', Apartment.ReadingLayout.A),
+                )
                 obj.save()  # triggers qr_code auto-generation
                 created.append(obj)
 

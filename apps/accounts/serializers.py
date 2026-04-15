@@ -99,6 +99,7 @@ class AssignedApartmentSerializer(serializers.Serializer):
     qr_code = serializers.CharField()
     number = serializers.CharField()
     floor = serializers.IntegerField()
+    reading_layout = serializers.CharField()
     tower_name = serializers.CharField(source='tower.name')
     building_name = serializers.CharField(source='tower.building.name')
     apartment_info = serializers.SerializerMethodField()
@@ -111,6 +112,8 @@ class AssignedApartmentSerializer(serializers.Serializer):
         import json
         return json.dumps({
             'qr_code': obj.qr_code,
+            'meter_id': obj.meter_id or '',
+            'meter_type': obj.reading_layout,
             'apartment_info': f'{obj.tower.name} — Depto {obj.number}',
             'apartment_id': obj.id,
         })
@@ -121,12 +124,14 @@ class MeSerializer(serializers.ModelSerializer):
     assigned_apartments = AssignedApartmentSerializer(many=True, read_only=True)
     organization_id = serializers.IntegerField(source='organization.id', read_only=True, default=None)
     organization_name = serializers.CharField(source='organization.name', read_only=True, default=None)
+    is_superuser = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = User
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name',
             'phone', 'role', 'is_active', 'date_joined',
+            'is_superuser',
             'organization_id', 'organization_name',
             'assigned_apartments',
         ]
