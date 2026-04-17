@@ -50,13 +50,24 @@ class ApartmentViewSet(viewsets.ModelViewSet):
         tower = serializer.validated_data['tower']
         items = serializer.validated_data['apartments']
 
-        objs = [
-            Apartment(tower=tower, number=a['number'], floor=a['floor'], meter_id=a['meter_id'])
-            for a in items
-        ]
+        created_list = []
+        errors = []
 
-        with transaction.atomic():
-            created = Apartment.objects.bulk_create(objs, ignore_conflicts=False)
+        for a in items:
+            try:
+                with transaction.atomic():
+                    obj = Apartment.objects.create(
+                        tower=tower,
+                        number=a['number'],
+                        floor=a['floor'],
+                        meter_id=a['meter_id'],
+                    )
+                    created_list.append(obj)
+            except Exception as e:
+                errors.append({'number': a['number'], 'meter_id': a['meter_id'], 'error': str(e)})
 
-        out = ApartmentSerializer(created, many=True)
-        return Response({'created': len(created), 'apartments': out.data}, status=status.HTTP_201_CREATED)
+        out = ApartmentSerializer(created_list, many=True)
+        resp = {'created': len(created_list), 'apartments': out.data}
+        if errors:
+            resp['errors'] = errors
+        return Response(resp, status=status.HTTP_201_CREATED)
