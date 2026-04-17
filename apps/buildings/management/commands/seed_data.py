@@ -134,9 +134,16 @@ class Command(BaseCommand):
 
         apartments = []
         for tower, number, floor, meter_id in apt_data:
+            # qr_code debe ser único globalmente; el modelo auto-genera "504B" etc. y puede
+            # chocar con departamentos reales ya cargados. Forzar un código estable por seed.
+            seed_qr = f'{tower.building_id}-{tower.id}-{number}'[:50]
             apt, _ = Apartment.objects.get_or_create(
                 tower=tower, number=number,
-                defaults={'floor': floor, 'meter_id': meter_id},
+                defaults={
+                    'floor': floor,
+                    'meter_id': meter_id,
+                    'qr_code': seed_qr,
+                },
             )
             apartments.append(apt)
 
