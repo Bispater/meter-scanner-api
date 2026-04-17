@@ -121,13 +121,19 @@ curl -fsSL https://get.docker.com | sh
 # 4. Ir al proyecto y levantar
 cd /home/usuario/hydroscan-api
 
-# 5. Editar variables de entorno en docker-compose.yml
-#    - Cambiar SECRET_KEY a un valor seguro
-#    - Cambiar DB_PASSWORD
-#    - Ajustar ALLOWED_HOSTS y CORS_ALLOWED_ORIGINS
+# 5. Editar `.env.prod` (o variables en compose)
+#    - SECRET_KEY, DB_PASSWORD
+#    - `CORS_ALLOWED_ORIGINS`: todos los orígenes desde los que cargará el admin (HTTPS de producción).
+#      Si pruebas el Angular en `http://localhost:4200` contra esta API, añade también
+#      `http://localhost:4200,http://127.0.0.1:4200` o el navegador bloqueará las peticiones (CORS).
+#    - `CSRF_TRUSTED_ORIGINS` si usas formularios Django; la API JWT suele ir solo con CORS bien configurado.
 
-# 6. Levantar
-docker compose up --build -d
+# 6. Levantar (producción usa `docker-compose.prod.yml`)
+docker compose -f docker-compose.prod.yml up --build -d
+
+# 7. Datos demo (opcional, una sola vez): el arranque en prod **no** ejecuta `seed_data`.
+#    docker compose -f docker-compose.prod.yml exec web python manage.py seed_data
+#    Crear superusuario alternativo: `exec web python manage.py createsuperuser`
 ```
 
 ### Generar SECRET_KEY seguro

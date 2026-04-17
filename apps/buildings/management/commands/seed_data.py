@@ -1,7 +1,14 @@
 """
 Management command to populate the database with demo data.
 Usage: python manage.py seed_data
+
+Solo para desarrollo / primera instalación. No está en el arranque de producción (docker-compose.prod).
+
+- Si la BD ya tiene mediciones, no crea más filas aleatorias.
+- Contraseñas de usuarios demo solo se fijan al crear el usuario (no en cada ejecución).
+- Asignaciones demo (jperez/mlopez) se pueden omitir con SEED_DEMO_ASSIGNMENTS=0
 """
+import os
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from decimal import Decimal
@@ -26,7 +33,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f'  ✓ Organization: {org.name}'))
 
         # ── Users ──
-        admin, _ = User.objects.get_or_create(
+        admin, admin_created = User.objects.get_or_create(
             username='admin',
             defaults={
                 'first_name': 'Admin',
@@ -39,11 +46,12 @@ class Command(BaseCommand):
                 'organization': org,
             },
         )
-        admin.set_password('admin')
+        if admin_created:
+            admin.set_password('admin')
         admin.organization = org
         admin.save()
 
-        jperez, _ = User.objects.get_or_create(
+        jperez, jp_created = User.objects.get_or_create(
             username='jperez',
             defaults={
                 'first_name': 'Juan',
@@ -54,11 +62,12 @@ class Command(BaseCommand):
                 'organization': org,
             },
         )
-        jperez.set_password('1234')
+        if jp_created:
+            jperez.set_password('1234')
         jperez.organization = org
         jperez.save()
 
-        mlopez, _ = User.objects.get_or_create(
+        mlopez, ml_created = User.objects.get_or_create(
             username='mlopez',
             defaults={
                 'first_name': 'María',
@@ -69,7 +78,8 @@ class Command(BaseCommand):
                 'organization': org,
             },
         )
-        mlopez.set_password('1234')
+        if ml_created:
+            mlopez.set_password('1234')
         mlopez.organization = org
         mlopez.save()
 
@@ -136,18 +146,22 @@ class Command(BaseCommand):
             f'Apartments: {Apartment.objects.count()}'
         ))
 
-        # ── Assign apartments to operators ──
-        torre_a_apts = Apartment.objects.filter(tower=tA)
-        torre_b_apts = Apartment.objects.filter(tower=tB)
-        torre_c_apts = Apartment.objects.filter(tower=tC)
+        # ── Assign apartments to operators (demo) — omitir en producción si ya configuraste usuarios
+        demo_assign = os.environ.get('SEED_DEMO_ASSIGNMENTS', '1').lower() in ('1', 'true', 'yes')
+        if demo_assign:
+            torre_a_apts = Apartment.objects.filter(tower=tA)
+            torre_b_apts = Apartment.objects.filter(tower=tB)
+            torre_c_apts = Apartment.objects.filter(tower=tC)
 
-        jperez.assigned_apartments.set(list(torre_a_apts) + list(torre_b_apts))
-        mlopez.assigned_apartments.set(list(torre_c_apts) + list(Apartment.objects.filter(tower__building=bld2)))
+            jperez.assigned_apartments.set(list(torre_a_apts) + list(torre_b_apts))
+            mlopez.assigned_apartments.set(list(torre_c_apts) + list(Apartment.objects.filter(tower__building=bld2)))
 
-        self.stdout.write(self.style.SUCCESS(
-            f'  ✓ Assignments: jperez={jperez.assigned_apartments.count()}, '
-            f'mlopez={mlopez.assigned_apartments.count()}'
-        ))
+            self.stdout.write(self.style.SUCCESS(
+                f'  ✓ Assignments: jperez={jperez.assigned_apartments.count()}, '
+                f'mlopez={mlopez.assigned_apartments.count()}'
+            ))
+        else:
+            self.stdout.write(self.style.WARNING('  ⊘ SEED_DEMO_ASSIGNMENTS=0 — sin reasignar departamentos demo'))
 
         # ── Measurements (demo) ──
         if Measurement.objects.count() == 0:
