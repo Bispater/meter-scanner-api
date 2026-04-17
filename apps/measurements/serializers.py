@@ -88,11 +88,89 @@ class MeasurementCreateSerializer(serializers.ModelSerializer):
                         )
                     })
 
+        if apartment:
+            cycle = self._find_active_cycle(apartment)
+            if cycle:
+                attrs['_matched_cycle'] = cycle
+            else:
+                enforcing = self._any_enforcing_cycle(apartment)
+                if enforcing:
+                    raise serializers.ValidationError({
+                        'apartment': (
+                            f'El departamento {apartment.number} pertenece al ciclo '
+                            f'"{enforcing.name}" que no está activo (estado: {enforcing.get_status_display()}). '
+                            f'Solo se permiten mediciones mientras el ciclo esté "En Curso".'
+                        )
+                    })
+
         return attrs
 
+    def _find_active_cycle(self, apartment):
+        """Find an in_progress cycle that includes this apartment."""
+        from apps.cycles.models import MeasurementCycle
+        from django.utils import timezone
+        today = timezone.now().date()
+
+        cycles = MeasurementCycle.objects.filter(
+            building=apartment.tower.building,
+            status='in_progress',
+            scheduled_date__lte=today,
+            deadline__gte=today,
+        ).prefetch_related('apartments')
+
+        for cycle in cycles:
+            if not cycle.apartments.exists():
+                return cycle
+            if cycle.apartments.filter(pk=apartment.pk).exists():
+                return cycle
+        return None
+
+    def _any_enforcing_cycle(self, apartment):
+        """Check if any enforcing cycle claims this apartment but is not in_progress."""
+        from apps.cycles.models import MeasurementCycle
+        cycles = MeasurementCycle.objects.filter(
+            building=apartment.tower.building,
+            enforce=True,
+            status__in=['pending', 'completed', 'closed'],
+        ).prefetch_related('apartments')
+
+        for cycle in cycles:
+            if not cycle.apartments.exists():
+                return cycle
+            if cycle.apartments.filter(pk=apartment.pk).exists():
+                return cycle
+        return None
+
     def create(self, validated_data):
-        # Auto-assign the authenticated user as operator
+        matched_cycle = validated_data.pop('_matched_cycle', None)
         request = self.context.get('request')
         if request and request.user.is_authenticated:
             validated_data['operator'] = request.user
-        return super().create(validated_data)
+        if matched_cycle:
+            validated_data['cycle'] = matched_cycle
+        measurement = super().create(validated_data)
+        if matched_cycle:
+            self._check_cycle_completion(matched_cycle)
+        return measurement
+
+    @staticmethod
+    def _check_cycle_completion(cycle):
+        """Auto-set cycle to 'completed' when all target apartments have been measured."""
+        target_apts = cycle.get_target_apartments()
+        total = target_apts.count()
+        if total == 0:
+            return
+        measured = (
+            Measurement.objects
+            .filter(
+                apartment__in=target_apts,
+                captured_at__date__gte=cycle.scheduled_date,
+                captured_at__date__lte=cycle.deadline,
+            )
+            .values('apartment')
+            .distinct()
+            .count()
+        )
+        if measured >= total and cycle.status == 'in_progress':
+            cycle.status = 'completed'
+            cycle.save(update_fields=['status'])

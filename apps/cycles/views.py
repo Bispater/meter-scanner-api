@@ -2,7 +2,6 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from apps.accounts.views import IsAdminUser
-from apps.buildings.models import Apartment
 from apps.measurements.models import Measurement
 from .models import MeasurementCycle
 from .serializers import (
@@ -38,15 +37,14 @@ class MeasurementCycleViewSet(viewsets.ModelViewSet):
     def progress(self, request, pk=None):
         """Detailed apartment-level progress for a cycle."""
         cycle = self.get_object()
-
-        apartments = Apartment.objects.filter(
-            tower__building=cycle.building,
-        ).select_related('tower').order_by('tower__name', 'floor', 'number')
+        apartments = cycle.get_target_apartments().select_related(
+            'tower'
+        ).order_by('tower__name', 'floor', 'number')
 
         measurements = {
             m.apartment_id: m
             for m in Measurement.objects.filter(
-                apartment__tower__building=cycle.building,
+                apartment__in=apartments,
                 captured_at__date__gte=cycle.scheduled_date,
                 captured_at__date__lte=cycle.deadline,
             ).select_related('operator').order_by('apartment_id', '-captured_at')
