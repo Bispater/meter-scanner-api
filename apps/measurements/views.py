@@ -8,26 +8,31 @@ from rest_framework.response import Response
 from .models import Measurement
 from .serializers import MeasurementSerializer, MeasurementCreateSerializer
 from . import ocr_service
+from apps.accounts.views import _managed_org_ids
 
 logger = logging.getLogger(__name__)
 
 
 class MeasurementViewSet(viewsets.ModelViewSet):
     """
-    Admins see all measurements.
-    Operators see only their own.
+    Admins see measurements within their org(s).
+    Operators see only their own measurements.
     """
     filterset_fields = ['status', 'meter_type', 'apartment', 'apartment__tower', 'operator']
-    search_fields = ['apartment__number', 'apartment__meter_id']
+    search_fields = ['apartment__number', 'apartment__meter_id', 'apartment__qr_code']
     ordering_fields = ['captured_at', 'reading_value', 'created_at']
 
     def get_queryset(self):
+        user = self.request.user
         qs = Measurement.objects.select_related(
             'apartment__tower__building', 'operator',
-        ).all()
-        if self.request.user.role == 'operator':
-            qs = qs.filter(operator=self.request.user)
-        return qs
+        )
+        if user.role == 'operator':
+            return qs.filter(operator=user)
+        org_ids = _managed_org_ids(user)
+        if org_ids is None:
+            return qs.all()
+        return qs.filter(apartment__tower__building__organization_id__in=org_ids)
 
     def get_serializer_class(self):
         if self.action in ('create',):
@@ -45,6 +50,7 @@ def ocr_analyze(request):
     POST /api/measurements/ocr/
     Body (multipart/form-data):
         - photo: image file (JPEG/PNG)
+        - meter_reading_type: optional, "A" or "B" (default "A")
     Response:
         { "ocr_value": "12345", "photo_url": "/media/measurements/2025/04/file.jpg" }
     """
@@ -57,9 +63,13 @@ def ocr_analyze(request):
 
     try:
         image_bytes = photo.read()
+        meter_reading_type = request.POST.get('meter_reading_type')
 
         # Run OCR via Gemini
-        ocr_value = ocr_service.recognize_from_bytes(image_bytes)
+        ocr_value = ocr_service.recognize_from_bytes(
+            image_bytes,
+            meter_reading_type=meter_reading_type,
+        )
 
         return Response({
             'ocr_value': ocr_value,

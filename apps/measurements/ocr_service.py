@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import logging
 from io import BytesIO
+from typing import Optional
 
 from django.conf import settings
 from PIL import Image
@@ -7,18 +10,46 @@ import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
 
-PROMPT = (
-    'Eres un sistema automatizado experto en lectura de medidores de agua. '
-    'Tu única tarea es extraer el número del consumo de agua actual. '
-    'Reglas: '
-    '1. Busca los números principales en los rodillos o diales centrales. '
-    '2. Ignora por completo cualquier número de serie impreso en la carcasa. '
-    '3. Ignora marcas de rotulador o marcador negro escritas sobre el cristal. '
-    '4. Devuelve ÚNICAMENTE los dígitos de la lectura (incluyendo ceros a la '
-    'izquierda si los hay). No agregues texto, ni explicaciones, ni unidades como m3.'
-)
+# Placeholder replaced by "Tipo A" or "Tipo B" for Gemini.
+_PROMPT_TEMPLATE = """Eres un experto en lectura de medidores de agua. Tu tarea es extraer la lectura exacta de 9 dígitos del medidor en la imagen, ignorando rayones o tinta negra. Si la tinta cubre un número, debes interpolar lógicamente su valor basándote en la posición física de los rodillos o agujas visibles.
+
+Instrucciones según el tipo de medidor:
+
+[CONFIGURACIÓN ACTIVA]: [AQUÍ_VA_LA_VARIABLE_DEL_TIPO]
+
+Si la configuración es 'Tipo A':
+El medidor tiene un contador superior de 5 rodillos (números enteros) y 4 esferas inferiores pequeñas (decimales).
+
+Lee los 5 rodillos superiores (de izquierda a derecha).
+
+Lee las 4 esferas inferiores (de izquierda a derecha, o en el orden que marquen los multiplicadores x0.1, x0.01, etc.).
+
+Formato requerido: 9 dígitos seguidos. Ejemplo: Si arriba dice 00546 y abajo las agujas marcan 1, 2, 0, 6, debes devolver exactamente: 005461206.
+
+Si la configuración es 'Tipo B':
+El medidor tiene un contador superior de 8 rodillos (5 enteros en negro, una coma/separador, y 3 decimales en rojo) y 1 esfera inferior pequeña.
+
+Lee los 8 rodillos superiores de izquierda a derecha.
+
+Lee la única esfera inferior.
+
+Formato requerido: 9 dígitos seguidos. Ejemplo: Si arriba dice 00546,120 y abajo marca 6, debes devolver exactamente: 005461206.
+
+Regla de ORO: Devuelve ÚNICA Y EXCLUSIVAMENTE una cadena de 9 caracteres numéricos. Sin espacios, sin comas, sin puntos, sin texto adicional. Si por culpa de la tinta es humanamente imposible adivinar un número en particular, reemplaza ese único dígito con la letra 'X' (ej: 005461X06), pero mantén siempre la longitud de 9 caracteres."""
 
 CIRCLE_DIAMETER_RATIO = 0.76
+
+
+def _normalize_reading_type(meter_reading_type: Optional[str]) -> str:
+    t = (meter_reading_type or 'A').strip().upper()
+    return t if t in ('A', 'B') else 'A'
+
+
+def build_prompt(meter_reading_type: Optional[str]) -> str:
+    """Build Gemini prompt; meter_reading_type is 'A' or 'B'."""
+    t = _normalize_reading_type(meter_reading_type)
+    label = 'Tipo A' if t == 'A' else 'Tipo B'
+    return _PROMPT_TEMPLATE.replace('[AQUÍ_VA_LA_VARIABLE_DEL_TIPO]', label)
 
 
 def _get_model():
@@ -53,14 +84,15 @@ def crop_to_circle_zone(image_bytes: bytes) -> bytes:
     return buf.read()
 
 
-def analyze_image(image_bytes: bytes) -> str:
+def analyze_image(image_bytes: bytes, meter_reading_type: Optional[str] = None) -> str:
     """
     Send image bytes to Gemini and return the recognized reading text.
     """
     model = _get_model()
+    prompt = build_prompt(meter_reading_type)
 
     response = model.generate_content([
-        PROMPT,
+        prompt,
         {'mime_type': 'image/jpeg', 'data': image_bytes},
     ])
 
@@ -72,9 +104,9 @@ def analyze_image(image_bytes: bytes) -> str:
     return text
 
 
-def recognize_from_bytes(image_bytes: bytes) -> str:
+def recognize_from_bytes(image_bytes: bytes, meter_reading_type: Optional[str] = None) -> str:
     """
     Full pipeline: crop + OCR.  Returns the recognized reading string.
     """
     cropped = crop_to_circle_zone(image_bytes)
-    return analyze_image(cropped)
+    return analyze_image(cropped, meter_reading_type=meter_reading_type)

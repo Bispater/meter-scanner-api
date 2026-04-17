@@ -1,22 +1,84 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import User
-from .serializers import UserSerializer, UserCreateSerializer, UserUpdateSerializer, MeSerializer
+from .models import User, Organization
+from .serializers import (
+    UserSerializer, UserCreateSerializer, UserUpdateSerializer, MeSerializer,
+    OrganizationSerializer,
+)
 
 
 class IsAdminUser(permissions.BasePermission):
     def has_permission(self, request, view):
-        return request.user and request.user.is_authenticated and request.user.role == 'admin'
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and (request.user.is_superuser or request.user.role == 'admin')
+        )
+
+
+class IsSuperAdminUser(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated and request.user.is_superuser)
+
+
+def _managed_org_ids(user):
+    """Returns org IDs current admin can manage. None = all (superuser)."""
+    if user.is_superuser:
+        return None
+    ids = set()
+    if user.organization_id:
+        ids.add(user.organization_id)
+    return ids
+
+
+class OrganizationViewSet(viewsets.ModelViewSet):
+    """CRUD for organizations. Superadmin only."""
+    serializer_class = OrganizationSerializer
+    permission_classes = [IsSuperAdminUser]
+
+    def get_queryset(self):
+        user = self.request.user
+        org_ids = _managed_org_ids(user)
+        if org_ids is None:
+            return Organization.objects.all()
+        return Organization.objects.filter(id__in=org_ids)
+
+    def perform_create(self, serializer):
+        serializer.save()
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    """CRUD for users. Only admins can manage users."""
-    queryset = User.objects.all()
+    """CRUD for users. Admins can only manage users in their org(s)."""
     permission_classes = [IsAdminUser]
     filterset_fields = ['role', 'is_active']
     search_fields = ['username', 'first_name', 'last_name', 'email']
     ordering_fields = ['date_joined', 'username']
+
+    def get_queryset(self):
+        org_ids = _managed_org_ids(self.request.user)
+        if org_ids is None:
+            return User.objects.all()
+        return User.objects.filter(organization_id__in=org_ids)
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if user.is_superuser:
+            if not serializer.validated_data.get('organization'):
+                serializer.save(organization=user.organization)
+            else:
+                serializer.save()
+        else:
+            # Tenant-admins can only create users in their own organization.
+            serializer.save(organization=user.organization)
+
+    def perform_update(self, serializer):
+        user = self.request.user
+        if user.is_superuser:
+            serializer.save()
+        else:
+            # Tenant-admins cannot move users between organizations.
+            serializer.save(organization=user.organization)
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -51,7 +113,10 @@ class UserViewSet(viewsets.ModelViewSet):
         # Always keep protected apartments regardless of what was submitted
         final_ids = apartment_ids | protected_ids
 
+        org_ids = _managed_org_ids(request.user)
         apartments = Apartment.objects.filter(id__in=final_ids)
+        if org_ids is not None:
+            apartments = apartments.filter(tower__building__organization_id__in=org_ids)
         user.assigned_apartments.set(apartments)
 
         removed_protected = protected_ids - apartment_ids
@@ -120,8 +185,10 @@ class UserViewSet(viewsets.ModelViewSet):
                 {
                     'id': apt.id,
                     'meter_id': apt.meter_id,
+                    'qr_code': apt.qr_code,
                     'number': apt.number,
                     'floor': apt.floor,
+                    'reading_layout': apt.reading_layout,
                     'tower_name': apt.tower.name,
                     'building_name': apt.tower.building.name,
                     'apartment_info': f'{apt.tower.name} — Depto {apt.number}',

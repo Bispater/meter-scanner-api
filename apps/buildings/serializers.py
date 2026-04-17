@@ -5,8 +5,8 @@ from .models import Building, Tower, Apartment
 class ApartmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Apartment
-        fields = ['id', 'number', 'floor', 'meter_id', 'tower']
-        read_only_fields = ['id']
+        fields = ['id', 'number', 'floor', 'meter_id', 'reading_layout', 'qr_code', 'tower']
+        read_only_fields = ['id', 'qr_code']
 
 
 class TowerSerializer(serializers.ModelSerializer):
@@ -29,7 +29,10 @@ class TowerCreateSerializer(serializers.ModelSerializer):
 class BulkApartmentItemSerializer(serializers.Serializer):
     number = serializers.CharField(max_length=20)
     floor = serializers.IntegerField(default=1)
-    meter_id = serializers.CharField(max_length=50)
+    meter_id = serializers.CharField(max_length=50, required=False, allow_blank=True, default='')
+    reading_layout = serializers.ChoiceField(
+        choices=['A', 'B'], required=False, default='A',
+    )
 
 
 class BulkApartmentSerializer(serializers.Serializer):
@@ -48,11 +51,12 @@ class BuildingSerializer(serializers.ModelSerializer):
     towers = TowerSerializer(many=True, read_only=True)
     tower_count = serializers.IntegerField(source='towers.count', read_only=True)
     apartment_count = serializers.SerializerMethodField()
+    organization_name = serializers.CharField(source='organization.name', read_only=True, default=None)
 
     class Meta:
         model = Building
-        fields = ['id', 'name', 'address', 'created_at', 'towers', 'tower_count', 'apartment_count']
-        read_only_fields = ['id', 'created_at']
+        fields = ['id', 'name', 'address', 'created_at', 'organization', 'organization_name', 'towers', 'tower_count', 'apartment_count']
+        read_only_fields = ['id', 'created_at', 'organization_name']
 
     def get_apartment_count(self, obj):
         return Apartment.objects.filter(tower__building=obj).count()
@@ -61,5 +65,6 @@ class BuildingSerializer(serializers.ModelSerializer):
 class BuildingCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Building
-        fields = ['id', 'name', 'address']
+        fields = ['id', 'name', 'address', 'organization']
         read_only_fields = ['id']
+        extra_kwargs = {'organization': {'required': False, 'allow_null': True}}
