@@ -7,12 +7,15 @@ from .models import Measurement
 class MeasurementAdmin(admin.ModelAdmin):
     list_display = [
         'apartment', 'reading_value', 'ocr_value', 'modified_by_user',
-        'unit', 'status', 'operator', 'photo_thumbnail', 'captured_at',
+        'unit', 'status', 'operator', 'photo_thumbnail', 'captured_at', 'deleted_at',
     ]
     list_filter = ['status', 'meter_type', 'modified_by_user', 'apartment__tower__building']
     search_fields = ['apartment__number', 'apartment__meter_id']
     date_hierarchy = 'captured_at'
     readonly_fields = ['photo_preview', 'ocr_value', 'modified_by_user']
+
+    def get_queryset(self, request):
+        return Measurement.all_objects.select_related('apartment__tower__building', 'operator')
 
     @admin.display(description='Foto')
     def photo_thumbnail(self, obj):

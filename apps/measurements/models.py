@@ -2,6 +2,25 @@ from django.db import models
 from django.conf import settings
 
 
+class MeasurementQuerySet(models.QuerySet):
+    def active_only(self):
+        return self.filter(deleted_at__isnull=True)
+
+
+class ActiveMeasurementManager(models.Manager):
+    """Solo mediciones no eliminadas (eliminación lógica)."""
+
+    def get_queryset(self):
+        return MeasurementQuerySet(self.model, using=self._db).filter(deleted_at__isnull=True)
+
+
+class AllMeasurementsManager(models.Manager):
+    """Incluye eliminadas (papelera / restauración)."""
+
+    def get_queryset(self):
+        return MeasurementQuerySet(self.model, using=self._db)
+
+
 class Measurement(models.Model):
     class Status(models.TextChoices):
         VERIFIED = 'verified', 'Validado'
@@ -45,6 +64,15 @@ class Measurement(models.Model):
     )
     captured_at = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text='Si está definido, la medición está en papelera (soft delete).',
+    )
+
+    objects = ActiveMeasurementManager()
+    all_objects = AllMeasurementsManager()
 
     class Meta:
         ordering = ['-captured_at']
