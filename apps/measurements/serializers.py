@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Measurement
+from .models import Measurement, MeasurementAuditLog
 
 
 def _apartment_queryset():
@@ -24,6 +24,19 @@ class _ApartmentPKField(serializers.PrimaryKeyRelatedField):
             )
 
 
+class MeasurementAuditLogSerializer(serializers.ModelSerializer):
+    edited_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MeasurementAuditLog
+        fields = ['id', 'field_name', 'old_value', 'new_value', 'note', 'created_at', 'edited_by_name']
+
+    def get_edited_by_name(self, obj):
+        if obj.edited_by:
+            return obj.edited_by.get_full_name() or obj.edited_by.username
+        return None
+
+
 class MeasurementSerializer(serializers.ModelSerializer):
     tower_name = serializers.CharField(source='apartment.tower.name', read_only=True)
     building_name = serializers.CharField(source='apartment.tower.building.name', read_only=True)
@@ -32,6 +45,8 @@ class MeasurementSerializer(serializers.ModelSerializer):
     operator_name = serializers.SerializerMethodField()
     photo_url = serializers.SerializerMethodField()
     retention_days_remaining = serializers.SerializerMethodField()
+    cycle_name = serializers.SerializerMethodField()
+    cycle_building_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Measurement
@@ -41,11 +56,20 @@ class MeasurementSerializer(serializers.ModelSerializer):
             'photo', 'photo_url', 'status', 'meter_type',
             'latitude', 'longitude',
             'captured_at', 'created_at', 'deleted_at',
-            # Read-only enriched fields
+            'cycle',
             'tower_name', 'building_name', 'apartment_number', 'meter_id',
             'operator_name', 'retention_days_remaining',
+            'cycle_name', 'cycle_building_name',
         ]
         read_only_fields = ['id', 'created_at', 'deleted_at']
+
+    def get_cycle_name(self, obj):
+        return obj.cycle.name if obj.cycle_id else None
+
+    def get_cycle_building_name(self, obj):
+        if obj.cycle_id:
+            return obj.cycle.building.name
+        return None
 
     def get_retention_days_remaining(self, obj):
         if not obj.deleted_at:
@@ -68,6 +92,65 @@ class MeasurementSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.photo.url)
             return obj.photo.url
         return None
+
+
+class MeasurementDetailSerializer(MeasurementSerializer):
+    audit_logs = MeasurementAuditLogSerializer(many=True, read_only=True)
+
+    class Meta(MeasurementSerializer.Meta):
+        fields = MeasurementSerializer.Meta.fields + ['audit_logs']
+
+
+class MeasurementAdminUpdateSerializer(serializers.ModelSerializer):
+    """PATCH por administradores: lectura, estado y nota de auditoría."""
+
+    edit_note = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=500)
+
+    class Meta:
+        model = Measurement
+        fields = ['reading_value', 'status', 'edit_note']
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            raise serializers.ValidationError('No autenticado.')
+        if getattr(request.user, 'role', None) != 'admin':
+            raise serializers.ValidationError(
+                {'detail': 'Solo los administradores pueden editar mediciones desde el panel.'}
+            )
+        return attrs
+
+    def update(self, instance, validated_data):
+        note = (validated_data.pop('edit_note', None) or '')[:500]
+        old_reading = str(instance.reading_value)
+        old_status = instance.status
+
+        instance = super().update(instance, validated_data)
+
+        user = self.context['request'].user
+        if old_reading != str(instance.reading_value):
+            MeasurementAuditLog.objects.create(
+                measurement=instance,
+                edited_by=user,
+                field_name='reading_value',
+                old_value=old_reading,
+                new_value=str(instance.reading_value),
+                note=note,
+            )
+        if old_status != instance.status:
+            MeasurementAuditLog.objects.create(
+                measurement=instance,
+                edited_by=user,
+                field_name='status',
+                old_value=old_status,
+                new_value=instance.status,
+                note=note,
+            )
+
+        return instance
+
+    def to_representation(self, instance):
+        return MeasurementDetailSerializer(instance, context=self.context).data
 
 
 class MeasurementCreateSerializer(serializers.ModelSerializer):

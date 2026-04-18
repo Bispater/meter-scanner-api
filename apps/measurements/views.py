@@ -9,7 +9,12 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 
 from .models import Measurement
-from .serializers import MeasurementSerializer, MeasurementCreateSerializer
+from .serializers import (
+    MeasurementSerializer,
+    MeasurementCreateSerializer,
+    MeasurementDetailSerializer,
+    MeasurementAdminUpdateSerializer,
+)
 from . import ocr_service
 from apps.accounts.views import IsAdminUser, _managed_org_ids
 
@@ -20,7 +25,7 @@ RETENTION_DAYS = 30
 
 def _measurement_base_queryset(user):
     qs = Measurement.all_objects.select_related(
-        'apartment__tower__building', 'operator',
+        'apartment__tower__building', 'operator', 'cycle', 'cycle__building',
     )
     if user.role == 'operator':
         return qs.filter(operator=user)
@@ -46,13 +51,20 @@ class MeasurementViewSet(viewsets.ModelViewSet):
         base = _measurement_base_queryset(user)
         if self.action == 'restore':
             return base.filter(deleted_at__isnull=False)
-        return base.filter(deleted_at__isnull=True)
+        qs = base.filter(deleted_at__isnull=True)
+        if self.action == 'retrieve':
+            qs = qs.prefetch_related('audit_logs__edited_by')
+        return qs
 
     def perform_destroy(self, instance):
         instance.deleted_at = timezone.now()
         instance.save(update_fields=['deleted_at'])
 
     def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return MeasurementDetailSerializer
+        if self.action in ('update', 'partial_update'):
+            return MeasurementAdminUpdateSerializer
         if self.action in ('create',):
             return MeasurementCreateSerializer
         return MeasurementSerializer

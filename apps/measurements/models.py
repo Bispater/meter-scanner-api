@@ -79,3 +79,31 @@ class Measurement(models.Model):
 
     def __str__(self):
         return f'{self.apartment} — {self.reading_value} {self.unit} ({self.captured_at:%d/%m/%Y})'
+
+
+class MeasurementAuditLog(models.Model):
+    """Historial de cambios hechos por administradores (p. ej. lectura corregida)."""
+
+    measurement = models.ForeignKey(
+        Measurement,
+        on_delete=models.CASCADE,
+        related_name='audit_logs',
+    )
+    edited_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='measurement_audit_edits',
+    )
+    field_name = models.CharField(max_length=64)
+    old_value = models.TextField(blank=True)
+    new_value = models.TextField(blank=True)
+    note = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.measurement_id} {self.field_name} @ {self.created_at:%Y-%m-%d %H:%M}'
