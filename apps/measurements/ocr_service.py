@@ -21,11 +21,13 @@ Si la configuración es 'Tipo A':
 - Ejemplo: rodillos 00546 y esferas 1,2,0,6 → 005461206
 
 Si la configuración es 'Tipo B':
-- 8 dígitos enteros (rodillos) + 4 dígitos en la parte decimal; el último de esos 4 corresponde a la esfera roja.
-- Formato de salida: exactamente 12 caracteres (solo dígitos o 'X' si es ilegible).
-- Ejemplo: 00041907 en enteros y decimales 1907 → 000419071907 (12 caracteres)
+- 8 dígitos enteros en los rodillos negros, de izquierda a derecha.
+- 1 dígito adicional correspondiente SOLO a la esfera roja/agua (decimal visual), lectura del puntero.
+- NO incluyas otros dígitos decimales adicionales: solo ese último dígito de la esfera.
+- Formato de salida: exactamente 9 caracteres (los 8 primeros son enteros, el 9.º es la esfera). Usa X si un dígito rodillo es ilegible.
+- Ejemplo: rodillos 00041907 y esfera que marca 9 → 000419079
 
-Regla de ORO: Devuelve ÚNICAMENTE la cadena de dígitos (y X si aplica), sin espacios, comas, texto ni explicación. Longitud exacta: 9 para Tipo A, 12 para Tipo B."""
+Regla de ORO: Devuelve ÚNICAMENTE la cadena de dígitos (y X si aplica), sin espacios, comas, texto ni explicación. Longitud exacta: 9 tanto para Tipo A como para Tipo B."""
 
 CIRCLE_DIAMETER_RATIO = 0.76
 
