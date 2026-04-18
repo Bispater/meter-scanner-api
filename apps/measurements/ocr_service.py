@@ -11,31 +11,21 @@ import google.generativeai as genai
 logger = logging.getLogger(__name__)
 
 # Placeholder replaced by "Tipo A" or "Tipo B" for Gemini.
-_PROMPT_TEMPLATE = """Eres un experto en lectura de medidores de agua. Tu tarea es extraer la lectura exacta de 9 dígitos del medidor en la imagen, ignorando rayones o tinta negra. Si la tinta cubre un número, debes interpolar lógicamente su valor basándote en la posición física de los rodillos o agujas visibles.
-
-Instrucciones según el tipo de medidor:
+_PROMPT_TEMPLATE = """Eres un experto en lectura de medidores de agua. Extrae la lectura del medidor en la imagen.
 
 [CONFIGURACIÓN ACTIVA]: [AQUÍ_VA_LA_VARIABLE_DEL_TIPO]
 
 Si la configuración es 'Tipo A':
-El medidor tiene un contador superior de 5 rodillos (números enteros) y 4 esferas inferiores pequeñas (decimales).
-
-Lee los 5 rodillos superiores (de izquierda a derecha).
-
-Lee las 4 esferas inferiores (de izquierda a derecha, o en el orden que marquen los multiplicadores x0.1, x0.01, etc.).
-
-Formato requerido: 9 dígitos seguidos. Ejemplo: Si arriba dice 00546 y abajo las agujas marcan 1, 2, 0, 6, debes devolver exactamente: 005461206.
+- 5 dígitos enteros (rodillos superiores) + 4 dígitos de esferas/decimales inferiores.
+- Formato de salida: exactamente 9 caracteres (solo dígitos 0-9 o 'X' si un dígito es ilegible).
+- Ejemplo: rodillos 00546 y esferas 1,2,0,6 → 005461206
 
 Si la configuración es 'Tipo B':
-El medidor tiene un contador superior de 8 rodillos (5 enteros en negro, una coma/separador, y 3 decimales en rojo) y 1 esfera inferior pequeña.
+- 8 dígitos enteros (rodillos) + 4 dígitos en la parte decimal; el último de esos 4 corresponde a la esfera roja.
+- Formato de salida: exactamente 12 caracteres (solo dígitos o 'X' si es ilegible).
+- Ejemplo: 00041907 en enteros y decimales 1907 → 000419071907 (12 caracteres)
 
-Lee los 8 rodillos superiores de izquierda a derecha.
-
-Lee la única esfera inferior.
-
-Formato requerido: 9 dígitos seguidos. Ejemplo: Si arriba dice 00546,120 y abajo marca 6, debes devolver exactamente: 005461206.
-
-Regla de ORO: Devuelve ÚNICA Y EXCLUSIVAMENTE una cadena de 9 caracteres numéricos. Sin espacios, sin comas, sin puntos, sin texto adicional. Si por culpa de la tinta es humanamente imposible adivinar un número en particular, reemplaza ese único dígito con la letra 'X' (ej: 005461X06), pero mantén siempre la longitud de 9 caracteres."""
+Regla de ORO: Devuelve ÚNICAMENTE la cadena de dígitos (y X si aplica), sin espacios, comas, texto ni explicación. Longitud exacta: 9 para Tipo A, 12 para Tipo B."""
 
 CIRCLE_DIAMETER_RATIO = 0.76
 

@@ -32,6 +32,13 @@ class Measurement(models.Model):
         DIGITAL_DRUM = 'digital_drum', 'Digital Tambor'
         DIGITAL = 'digital', 'Digital'
 
+    class AiAnalysisStatus(models.TextChoices):
+        PENDING = 'pending', 'Pendiente'
+        PROCESSING = 'processing', 'Procesando'
+        COMPLETE = 'complete', 'Completo'
+        FAILED = 'failed', 'Falló'
+        SKIPPED = 'skipped', 'Omitido'
+
     apartment = models.ForeignKey(
         'buildings.Apartment',
         on_delete=models.CASCADE,
@@ -44,9 +51,29 @@ class Measurement(models.Model):
         blank=True,
         related_name='measurements',
     )
-    reading_value = models.DecimalField(max_digits=12, decimal_places=3)
-    ocr_value = models.CharField(max_length=50, blank=True, default='',
-                                 help_text='Valor original detectado por OCR/IA')
+    reading_value = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        blank=True,
+        null=True,
+        help_text='Lectura del operador; si está vacía puede completarse con la estimación por IA.',
+    )
+    ocr_value = models.CharField(
+        max_length=50,
+        blank=True,
+        default='',
+        help_text='Estimación por IA (backend) o histórico OCR',
+    )
+    ai_analysis_status = models.CharField(
+        max_length=20,
+        choices=AiAnalysisStatus.choices,
+        default=AiAnalysisStatus.SKIPPED,
+    )
+    ai_agrees_with_operator = models.BooleanField(
+        null=True,
+        blank=True,
+        help_text='True si lectura manual e IA coinciden; False si no; null si no aplica.',
+    )
     modified_by_user = models.BooleanField(default=False,
                                            help_text='True si el operador editó el valor OCR')
     unit = models.CharField(max_length=10, default='m³')

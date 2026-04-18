@@ -42,6 +42,7 @@ class MeasurementSerializer(serializers.ModelSerializer):
     building_name = serializers.CharField(source='apartment.tower.building.name', read_only=True)
     apartment_number = serializers.CharField(source='apartment.number', read_only=True)
     meter_id = serializers.CharField(source='apartment.meter_id', read_only=True)
+    reading_layout = serializers.CharField(source='apartment.reading_layout', read_only=True)
     operator_name = serializers.SerializerMethodField()
     photo_url = serializers.SerializerMethodField()
     retention_days_remaining = serializers.SerializerMethodField()
@@ -52,12 +53,14 @@ class MeasurementSerializer(serializers.ModelSerializer):
         model = Measurement
         fields = [
             'id', 'apartment', 'operator', 'reading_value', 'ocr_value',
+            'ai_analysis_status', 'ai_agrees_with_operator',
             'modified_by_user', 'unit',
             'photo', 'photo_url', 'status', 'meter_type',
             'latitude', 'longitude',
             'captured_at', 'created_at', 'deleted_at',
             'cycle',
             'tower_name', 'building_name', 'apartment_number', 'meter_id',
+            'reading_layout',
             'operator_name', 'retention_days_remaining',
             'cycle_name', 'cycle_building_name',
         ]
@@ -196,6 +199,13 @@ class MeasurementCreateSerializer(serializers.ModelSerializer):
                         )
                     })
 
+        reading = attrs.get('reading_value')
+        photo = attrs.get('photo')
+        if reading is None and not photo:
+            raise serializers.ValidationError({
+                'detail': 'Debe adjuntar la foto del medidor y/o indicar la lectura manual.',
+            })
+
         return attrs
 
     def _find_active_cycle(self, apartment):
@@ -241,9 +251,19 @@ class MeasurementCreateSerializer(serializers.ModelSerializer):
             validated_data['operator'] = request.user
         if matched_cycle:
             validated_data['cycle'] = matched_cycle
+
+        photo = validated_data.get('photo')
+        validated_data['ai_analysis_status'] = (
+            Measurement.AiAnalysisStatus.PENDING if photo else Measurement.AiAnalysisStatus.SKIPPED
+        )
+
         measurement = super().create(validated_data)
         if matched_cycle:
             self._check_cycle_completion(matched_cycle)
+
+        from .ai_processing import hook_after_measurement_create
+
+        hook_after_measurement_create(measurement.pk, bool(measurement.photo))
         return measurement
 
     @staticmethod
