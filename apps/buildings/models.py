@@ -35,7 +35,7 @@ class Tower(models.Model):
 class Apartment(models.Model):
     class ReadingLayout(models.TextChoices):
         A = 'A', 'Tipo A (5 enteros + 4 esferas)'
-        B = 'B', 'Tipo B (8 rodillos + 1 esfera)'
+        B = 'B', 'Tipo B (5+4: 5 negros + 3 rojos + 1 esfera, misma coma lógica que A)'
 
     tower = models.ForeignKey(Tower, on_delete=models.CASCADE, related_name='apartments')
     number = models.CharField(max_length=20)

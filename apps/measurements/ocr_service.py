@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from io import BytesIO
 from typing import Optional
 
@@ -16,20 +17,35 @@ _PROMPT_TEMPLATE = """Eres un experto en lectura de medidores de agua. Extrae la
 [CONFIGURACIÓN ACTIVA]: [AQUÍ_VA_LA_VARIABLE_DEL_TIPO]
 
 Si la configuración es 'Tipo A':
-- 5 dígitos enteros (rodillos superiores) + 4 dígitos de esferas/decimales inferiores.
-- Formato de salida: exactamente 9 caracteres (solo dígitos 0-9 o 'X' si un dígito es ilegible).
-- Ejemplo: rodillos 00546 y esferas 1,2,0,6 → 005461206
+- 5 dígitos enteros (rodillos) y 4 decimales leídos en esferas (o equivalente).
+- Orden de salida, de izquierda a derecha: los 5 enteros, luego los 4 “decimales” (9 caracteres en total).
+- Usa 'X' si un dígito es ilegible.
+- Ejemplo: 00546 y esferas 1,2,0,6 → 005461206 (se muestra 00546,1206 con coma solo para humanos; tú no pongas comas)
 
 Si la configuración es 'Tipo B':
-- 8 dígitos enteros en los rodillos negros, de izquierda a derecha.
-- 1 dígito adicional correspondiente SOLO a la esfera roja/agua (decimal visual), lectura del puntero.
-- NO incluyas otros dígitos decimales adicionales: solo ese último dígito de la esfera.
-- Formato de salida: exactamente 9 caracteres (los 8 primeros son enteros, el 9.º es la esfera). Usa X si un dígito rodillo es ilegible.
-- Ejemplo: rodillos 00041907 y esfera que marca 9 → 000419079
+- Físicamente: una fila con 5 rodillos NEGROS (enteros) + 3 rodillos ROJOS (primeros decimales) y una ESFERA roja (el cuarto decimal). Suele haber una coma impresa en el cuerpo entre el 5.º y el 6.º dígito: NO la copies en la salida.
+- Lógicamente la lectura completa es exactamente 9 caracteres con la MISMA regla 5+4 que el Tipo A: posiciones 1-5 = parte entera, 6-9 = cuatro decimales.
+- Incluye el dígito de la esfera aunque esté un poco tapada (si no alcanza a verlo, use X en esa posición).
+- Ejemplo: 00000 (negros) + 064 (rojos) + 6 (esfera) → 000000646 (vista con coma: 00000,0646)
 
-Regla de ORO: Devuelve ÚNICAMENTE la cadena de dígitos (y X si aplica), sin espacios, comas, texto ni explicación. Longitud exacta: 9 tanto para Tipo A como para Tipo B."""
+Regla de ORO: Devuelve ÚNICAMENTE la cadena (solo 0-9 o X), sin comas, espacios, texto ni explicación. Longitud exacta: 9."""
 
 CIRCLE_DIAMETER_RATIO = 0.76
+
+_OCR_NON_DIGIT = re.compile(r'[^0-9Xx]')
+
+
+def _normalize_gemini_ocr_nine_chars(text: str) -> str:
+    """Mantiene solo dígitos (y X), recorta o rellena a 9 para estabilidad del cliente."""
+    s = (text or '').strip()
+    d = _OCR_NON_DIGIT.sub('', s).upper()
+    if not d:
+        return s
+    if len(d) > 9:
+        d = d[:9]
+    elif len(d) < 9:
+        d = d.zfill(9)
+    return d
 
 
 def _normalize_reading_type(meter_reading_type: Optional[str]) -> str:
@@ -93,7 +109,10 @@ def analyze_image(image_bytes: bytes, meter_reading_type: Optional[str] = None) 
 
     if not text:
         raise ValueError('Gemini devolvió respuesta vacía')
-    return text
+    normalized = _normalize_gemini_ocr_nine_chars(text)
+    if normalized != text:
+        logger.info('Gemini OCR normalizado: "%s" -> "%s"', text, normalized)
+    return normalized
 
 
 def recognize_from_bytes(image_bytes: bytes, meter_reading_type: Optional[str] = None) -> str:
