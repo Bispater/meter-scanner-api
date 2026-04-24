@@ -53,10 +53,10 @@ class Measurement(models.Model):
     )
     reading_value = models.DecimalField(
         max_digits=12,
-        decimal_places=3,
+        decimal_places=4,
         blank=True,
         null=True,
-        help_text='Lectura del operador; si está vacía puede completarse con la estimación por IA.',
+        help_text='Lectura del operador (hasta 4 decimales, alineado con cara 5+4); si está vacía puede completarse con la estimación por IA.',
     )
     ocr_value = models.CharField(
         max_length=50,

@@ -119,7 +119,7 @@ class CycleProgressApartmentSerializer(serializers.Serializer):
     tower_name = serializers.CharField()
     measured = serializers.BooleanField()
     measurement_id = serializers.IntegerField(allow_null=True)
-    reading_value = serializers.DecimalField(max_digits=12, decimal_places=3, allow_null=True)
+    reading_value = serializers.DecimalField(max_digits=12, decimal_places=4, allow_null=True)
     captured_at = serializers.DateTimeField(allow_null=True)
     operator_name = serializers.CharField(allow_null=True)
     measurement_status = serializers.CharField(allow_null=True)
