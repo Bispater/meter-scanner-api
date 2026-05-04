@@ -48,6 +48,8 @@ class MeasurementSerializer(serializers.ModelSerializer):
     retention_days_remaining = serializers.SerializerMethodField()
     cycle_name = serializers.SerializerMethodField()
     cycle_building_name = serializers.SerializerMethodField()
+    validated_by_name = serializers.SerializerMethodField()
+    rejected_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Measurement
@@ -63,8 +65,16 @@ class MeasurementSerializer(serializers.ModelSerializer):
             'reading_layout',
             'operator_name', 'retention_days_remaining',
             'cycle_name', 'cycle_building_name',
+            'validated_by', 'validated_by_name', 'validated_at',
+            'rejected_by', 'rejected_by_name', 'rejected_at',
+            'rejection_category', 'rejection_reason',
         ]
-        read_only_fields = ['id', 'created_at', 'deleted_at']
+        read_only_fields = [
+            'id', 'created_at', 'deleted_at',
+            'validated_by', 'validated_by_name', 'validated_at',
+            'rejected_by', 'rejected_by_name', 'rejected_at',
+            'rejection_category', 'rejection_reason',
+        ]
 
     def get_cycle_name(self, obj):
         return obj.cycle.name if obj.cycle_id else None
@@ -86,6 +96,16 @@ class MeasurementSerializer(serializers.ModelSerializer):
     def get_operator_name(self, obj):
         if obj.operator:
             return obj.operator.get_full_name() or obj.operator.username
+        return None
+
+    def get_validated_by_name(self, obj):
+        if obj.validated_by:
+            return obj.validated_by.get_full_name() or obj.validated_by.username
+        return None
+
+    def get_rejected_by_name(self, obj):
+        if obj.rejected_by:
+            return obj.rejected_by.get_full_name() or obj.rejected_by.username
         return None
 
     def get_photo_url(self, obj):

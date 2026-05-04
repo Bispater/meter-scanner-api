@@ -8,7 +8,7 @@ from rest_framework.decorators import action, api_view, permission_classes, pars
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 
-from .models import Measurement
+from .models import Measurement, MeasurementAuditLog
 from .serializers import (
     MeasurementSerializer,
     MeasurementCreateSerializer,
@@ -17,6 +17,7 @@ from .serializers import (
 )
 from . import ocr_service
 from apps.accounts.views import IsAdminUser, _managed_org_ids
+from apps.notifications.models import Notification
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,124 @@ class MeasurementViewSet(viewsets.ModelViewSet):
         measurement.deleted_at = None
         measurement.save(update_fields=['deleted_at'])
         ser = MeasurementSerializer(measurement, context={'request': request})
+        return Response(ser.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='validate',
+        permission_classes=[IsAdminUser],
+    )
+    def validate_measurement(self, request, pk=None):
+        """Valida (verifica) la medición y registra al admin que lo hizo."""
+        measurement = self.get_object()
+        old_status = measurement.status
+        now = timezone.now()
+
+        measurement.status = Measurement.Status.VERIFIED
+        measurement.validated_by = request.user
+        measurement.validated_at = now
+        measurement.rejected_by = None
+        measurement.rejected_at = None
+        measurement.rejection_category = ''
+        measurement.rejection_reason = ''
+        measurement.save(update_fields=[
+            'status', 'validated_by', 'validated_at',
+            'rejected_by', 'rejected_at', 'rejection_category', 'rejection_reason',
+        ])
+
+        if old_status != measurement.status:
+            MeasurementAuditLog.objects.create(
+                measurement=measurement,
+                edited_by=request.user,
+                field_name='status',
+                old_value=old_status,
+                new_value=measurement.status,
+                note='Validación desde el panel.',
+            )
+
+        if measurement.operator_id:
+            Notification.objects.create(
+                recipient=measurement.operator,
+                type=Notification.Type.MEASUREMENT_VALIDATED,
+                title='Medición validada',
+                body=f'Tu medición del depto {measurement.apartment.number} fue validada.',
+                measurement=measurement,
+                payload={
+                    'measurement_id': measurement.id,
+                    'apartment_number': measurement.apartment.number,
+                },
+            )
+
+        ser = MeasurementDetailSerializer(measurement, context={'request': request})
+        return Response(ser.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='reject',
+        permission_classes=[IsAdminUser],
+    )
+    def reject_measurement(self, request, pk=None):
+        """Rechaza la medición con motivo (categoría + nota) y notifica al operador."""
+        measurement = self.get_object()
+        category = (request.data.get('category') or '').strip()
+        reason = (request.data.get('reason') or '').strip()[:1000]
+
+        valid_categories = {c.value for c in Measurement.RejectionCategory}
+        if category not in valid_categories:
+            return Response(
+                {'category': f'Categoría inválida. Opciones: {", ".join(sorted(valid_categories))}.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        old_status = measurement.status
+        now = timezone.now()
+        measurement.status = Measurement.Status.REJECTED
+        measurement.rejected_by = request.user
+        measurement.rejected_at = now
+        measurement.rejection_category = category
+        measurement.rejection_reason = reason
+        measurement.validated_by = None
+        measurement.validated_at = None
+        measurement.save(update_fields=[
+            'status', 'rejected_by', 'rejected_at',
+            'rejection_category', 'rejection_reason',
+            'validated_by', 'validated_at',
+        ])
+
+        if old_status != measurement.status:
+            MeasurementAuditLog.objects.create(
+                measurement=measurement,
+                edited_by=request.user,
+                field_name='status',
+                old_value=old_status,
+                new_value=measurement.status,
+                note=(f'Rechazo ({category}). {reason}')[:500],
+            )
+
+        if measurement.operator_id:
+            category_label = dict(Measurement.RejectionCategory.choices).get(category, category)
+            body = f'Tu medición del depto {measurement.apartment.number} fue rechazada por: {category_label}.'
+            if reason:
+                body += f' Detalle: {reason}'
+            body += ' Debes volver a medir este departamento.'
+            Notification.objects.create(
+                recipient=measurement.operator,
+                type=Notification.Type.MEASUREMENT_REJECTED,
+                title='Medición rechazada',
+                body=body,
+                measurement=measurement,
+                payload={
+                    'measurement_id': measurement.id,
+                    'apartment_id': measurement.apartment_id,
+                    'apartment_number': measurement.apartment.number,
+                    'category': category,
+                    'reason': reason,
+                },
+            )
+
+        ser = MeasurementDetailSerializer(measurement, context={'request': request})
         return Response(ser.data, status=status.HTTP_200_OK)
 
 

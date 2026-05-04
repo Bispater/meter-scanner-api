@@ -18,6 +18,7 @@ urlpatterns = [
     path('api/accounts/', include('apps.accounts.urls')),
     path('api/buildings/', include('apps.buildings.urls')),
     path('api/measurements/', include('apps.measurements.urls')),
+    path('api/notifications/', include('apps.notifications.urls')),
     path('api/', include('apps.cycles.urls')),
 
     # OpenAPI / Swagger

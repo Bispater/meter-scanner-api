@@ -39,6 +39,10 @@ class Measurement(models.Model):
         FAILED = 'failed', 'Falló'
         SKIPPED = 'skipped', 'Omitido'
 
+    class RejectionCategory(models.TextChoices):
+        PHOTO = 'photo', 'Foto'
+        READING = 'reading', 'Medición manual incorrecta'
+
     apartment = models.ForeignKey(
         'buildings.Apartment',
         on_delete=models.CASCADE,
@@ -97,6 +101,29 @@ class Measurement(models.Model):
         db_index=True,
         help_text='Si está definido, la medición está en papelera (soft delete).',
     )
+    validated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='validated_measurements',
+    )
+    validated_at = models.DateTimeField(null=True, blank=True)
+    rejected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='rejected_measurements',
+    )
+    rejected_at = models.DateTimeField(null=True, blank=True)
+    rejection_category = models.CharField(
+        max_length=20,
+        choices=RejectionCategory.choices,
+        blank=True,
+        default='',
+    )
+    rejection_reason = models.TextField(blank=True, default='')
 
     objects = ActiveMeasurementManager()
     all_objects = AllMeasurementsManager()

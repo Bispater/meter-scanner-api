@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     'apps.buildings',
     'apps.measurements',
     'apps.cycles',
+    'apps.notifications',
 ]
 
 MIDDLEWARE = [
