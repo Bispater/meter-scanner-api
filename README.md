@@ -127,6 +127,9 @@ cd /home/usuario/hydroscan-api
 #      Si pruebas el Angular en `http://localhost:4200` contra esta API, añade también
 #      `http://localhost:4200,http://127.0.0.1:4200` o el navegador bloqueará las peticiones (CORS).
 #    - `CSRF_TRUSTED_ORIGINS` si usas formularios Django; la API JWT suele ir solo con CORS bien configurado.
+#    - **Imágenes `/media/`:** Django las sirve con los mismos `Access-Control-Allow-Origin` que la API.
+#      Si tienes **nginx delante** sirviendo `/media/` como archivos estáticos (`alias`), las peticiones **no** llegan a Django y el admin web fallará con CORS al hacer `fetch`. Solución: hacer `proxy_pass` de `/media/` al contenedor gunicorn **o** en ese `location` de nginx añadir:
+#      `add_header Access-Control-Allow-Origin "https://meterscan-admin.web.app";` (y `OPTIONS` si hace falta).
 
 # 6. Levantar (producción usa `docker-compose.prod.yml`)
 docker compose -f docker-compose.prod.yml up --build -d

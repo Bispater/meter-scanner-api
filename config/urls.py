@@ -1,10 +1,10 @@
 from django.contrib import admin
-from django.urls import path, include
-from django.conf import settings
-from django.conf.urls.static import static
+from django.urls import path, include, re_path
 from django.http import JsonResponse
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+
+from config.media_views import serve_media_with_cors
 
 urlpatterns = [
     path('api/health/', lambda _: JsonResponse({'status': 'ok'})),
@@ -24,7 +24,8 @@ urlpatterns = [
     # OpenAPI / Swagger
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
-]
 
-# Serve media files (in production, consider using nginx instead)
-urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    # /media/: siempre pasan por Django (incluye DEBUG=False) para poder aplicar CORS.
+    # Nginx frente al contenedor debe reenviar /media/* al upstream, no servir archivo estático solo.
+    re_path(r'^media/(?P<path>.+)$', serve_media_with_cors, name='media_serve'),
+]
