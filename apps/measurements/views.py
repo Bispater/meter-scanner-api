@@ -1,6 +1,11 @@
+import io
 import logging
+import os
+import re
+import zipfile
 from datetime import timedelta
 
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import viewsets, permissions, status
@@ -22,6 +27,16 @@ from apps.notifications.models import Notification
 logger = logging.getLogger(__name__)
 
 RETENTION_DAYS = 30
+PHOTOS_ZIP_MAX = 1000  # tope defensivo para no agotar memoria al exportar
+PHOTOS_ZIP_DEFAULT_SUBDIR = 'fotos_mediciones'
+
+
+def _zip_safe_part(value, maxlen=64):
+    """Sanitiza un fragmento para usarlo como nombre de carpeta/archivo en el ZIP."""
+    s = (value or '').strip()
+    s = re.sub(r'[^\w\s.-]', '', s, flags=re.UNICODE)
+    s = re.sub(r'\s+', '_', s).strip('._')
+    return (s[:maxlen] or 'sin_dato')
 
 
 def _measurement_base_queryset(user):
@@ -226,6 +241,167 @@ class MeasurementViewSet(viewsets.ModelViewSet):
 
         ser = MeasurementDetailSerializer(measurement, context={'request': request})
         return Response(ser.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='reassign',
+        permission_classes=[IsAdminUser],
+    )
+    def reassign(self, request, pk=None):
+        """
+        Reasigna la medición a otro departamento (p. ej., el operador escaneó un QR
+        equivocado y se descubrió viendo la foto). Crea entrada en el historial.
+
+        Body: { apartment_id: int, note?: str }
+        """
+        from apps.buildings.models import Apartment
+
+        measurement = self.get_object()
+        target_id = request.data.get('apartment_id')
+        if target_id in (None, '', 0):
+            return Response(
+                {'apartment_id': 'Requerido. Indica el id del depto destino.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            target_id = int(target_id)
+        except (TypeError, ValueError):
+            return Response(
+                {'apartment_id': 'apartment_id debe ser un entero.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # El admin debe tener acceso al edificio destino (mismo conjunto de orgs gestionadas).
+        target_qs = Apartment.objects.select_related('tower__building')
+        org_ids = _managed_org_ids(request.user)
+        if org_ids is not None:
+            target_qs = target_qs.filter(tower__building__organization_id__in=org_ids)
+        target = target_qs.filter(pk=target_id).first()
+        if target is None:
+            return Response(
+                {'apartment_id': 'No existe el departamento destino o no tienes acceso a su edificio.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        old_apt = measurement.apartment
+        if old_apt.id == target.id:
+            return Response(
+                {'apartment_id': 'La medición ya pertenece a ese departamento.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        note = (request.data.get('note') or '').strip()[:500]
+        old_label = f'{old_apt.tower.building.name} · {old_apt.tower.name} · {old_apt.number}'
+        new_label = f'{target.tower.building.name} · {target.tower.name} · {target.number}'
+
+        measurement.apartment = target
+        measurement.save(update_fields=['apartment'])
+
+        MeasurementAuditLog.objects.create(
+            measurement=measurement,
+            edited_by=request.user,
+            field_name='apartment',
+            old_value=old_label,
+            new_value=new_label,
+            note=note or 'Reasignación desde panel.',
+        )
+
+        ser = MeasurementDetailSerializer(measurement, context={'request': request})
+        return Response(ser.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='photos-zip',
+        permission_classes=[IsAdminUser],
+    )
+    def photos_zip(self, request):
+        """
+        Devuelve un ZIP con las fotos de las mediciones indicadas, organizado en
+        carpetas Edificio/Torre/. Una sola petición — evita 540 fetches desde el
+        navegador y problemas de CORS sobre /media/.
+
+        Body: { measurement_ids: [int, ...] }
+        """
+        ids = request.data.get('measurement_ids')
+        if not isinstance(ids, list) or not ids:
+            return Response(
+                {'error': 'measurement_ids: lista no vacía requerida.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Filtra IDs válidos y aplica el tope defensivo.
+        clean_ids = []
+        for x in ids[:PHOTOS_ZIP_MAX]:
+            try:
+                clean_ids.append(int(x))
+            except (TypeError, ValueError):
+                continue
+        if not clean_ids:
+            return Response({'error': 'No hay IDs válidos.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        qs = (
+            _measurement_base_queryset(request.user)
+            .filter(id__in=clean_ids, deleted_at__isnull=True)
+            .select_related('apartment__tower__building')
+            .order_by(
+                'apartment__tower__building__name',
+                'apartment__tower__name',
+                'apartment__number',
+                'captured_at',
+            )
+        )
+
+        buf = io.BytesIO()
+        included = 0
+        skipped = 0
+        used_names = set()
+
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
+            for m in qs:
+                if not m.photo:
+                    skipped += 1
+                    continue
+                try:
+                    with m.photo.open('rb') as f:
+                        data = f.read()
+                except Exception as e:  # archivo perdido / IO error → omitir
+                    logger.warning('photos_zip: skip measurement %s — %s', m.pk, e)
+                    skipped += 1
+                    continue
+
+                building = _zip_safe_part(m.apartment.tower.building.name)
+                tower = _zip_safe_part(m.apartment.tower.name)
+                apt = _zip_safe_part(m.apartment.number)
+                stamp = m.captured_at.strftime('%Y-%m-%d_%H%M%S') if m.captured_at else 'sin_fecha'
+                ext = (os.path.splitext(m.photo.name)[1] or '.jpg').lower()
+                base = f'{building}/{tower}/Depto-{apt}__{stamp}'
+                full = f'{base}{ext}'
+                n = 2
+                while full in used_names:
+                    full = f'{base}_{n}{ext}'
+                    n += 1
+                used_names.add(full)
+                zf.writestr(full, data)
+                included += 1
+
+        if included == 0:
+            return Response(
+                {'error': 'No hay fotos descargables para los IDs indicados.', 'skipped': skipped},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        buf.seek(0)
+        response = HttpResponse(buf.getvalue(), content_type='application/zip')
+        fname = f'{PHOTOS_ZIP_DEFAULT_SUBDIR}_{timezone.now().strftime("%Y%m%d_%H%M")}.zip'
+        response['Content-Disposition'] = f'attachment; filename="{fname}"'
+        response['X-Photos-Included'] = str(included)
+        response['X-Photos-Skipped'] = str(skipped)
+        # Permite al frontend leer estos headers cuando el browser aplique CORS.
+        response['Access-Control-Expose-Headers'] = (
+            'Content-Disposition, X-Photos-Included, X-Photos-Skipped'
+        )
+        return response
 
 
 @api_view(['POST'])
