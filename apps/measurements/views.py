@@ -30,13 +30,39 @@ RETENTION_DAYS = 30
 PHOTOS_ZIP_MAX = 1000  # tope defensivo para no agotar memoria al exportar
 PHOTOS_ZIP_DEFAULT_SUBDIR = 'fotos_mediciones'
 
+SPANISH_MONTHS = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+]
 
-def _zip_safe_part(value, maxlen=64):
+
+def _zip_safe_part(value, maxlen=80):
     """Sanitiza un fragmento para usarlo como nombre de carpeta/archivo en el ZIP."""
     s = (value or '').strip()
     s = re.sub(r'[^\w\s.-]', '', s, flags=re.UNICODE)
-    s = re.sub(r'\s+', '_', s).strip('._')
+    s = re.sub(r'\s+', ' ', s).strip(' ._')
     return (s[:maxlen] or 'sin_dato')
+
+
+def _tower_letter(name):
+    """'Torre A' → 'A'; 'Torre 2' → '2'; 'Norte' → 'Norte'."""
+    s = (name or '').strip()
+    s = re.sub(r'^torre\s+', '', s, flags=re.IGNORECASE).strip()
+    return s or (name or '').strip() or '?'
+
+
+def _infer_period_label(measurements):
+    """Si todas las mediciones caen en el mismo mes calendario, devuelve 'YYYY Mes' en español."""
+    months = set()
+    for m in measurements:
+        if m.captured_at:
+            months.add((m.captured_at.year, m.captured_at.month))
+        if len(months) > 1:
+            return ''
+    if len(months) != 1:
+        return ''
+    y, mo = next(iter(months))
+    return f'{y} {SPANISH_MONTHS[mo - 1]}'
 
 
 def _measurement_base_queryset(user):
@@ -347,10 +373,17 @@ class MeasurementViewSet(viewsets.ModelViewSet):
             .order_by(
                 'apartment__tower__building__name',
                 'apartment__tower__name',
+                'apartment__floor',
                 'apartment__number',
                 'captured_at',
             )
         )
+
+        # Etiqueta de período: la manda el frontend según filtros activos
+        # (ej. "2026 Abril" o nombre de ciclo). Si no, intentamos inferir.
+        period_label = (request.data.get('period_label') or '').strip()
+        if not period_label:
+            period_label = _infer_period_label(qs)
 
         buf = io.BytesIO()
         included = 0
@@ -370,12 +403,22 @@ class MeasurementViewSet(viewsets.ModelViewSet):
                     skipped += 1
                     continue
 
-                building = _zip_safe_part(m.apartment.tower.building.name)
-                tower = _zip_safe_part(m.apartment.tower.name)
+                # Nivel 1: "Edificio YYYY Mes" (o solo "Edificio" si no hay etiqueta).
+                building_name = m.apartment.tower.building.name
+                building_dir = _zip_safe_part(
+                    f'{building_name} {period_label}'.strip()
+                )
+                # Nivel 2: nombre de torre tal cual (ej. "Torre A").
+                tower_dir = _zip_safe_part(m.apartment.tower.name)
+                # Nivel 3: "P NN L" — piso 0-padded a 2 + letra de torre.
+                floor_n = m.apartment.floor or 0
+                tletter = _zip_safe_part(_tower_letter(m.apartment.tower.name), maxlen=8)
+                floor_dir = f'P {floor_n:02d} {tletter}'
+                # Archivo: Depto-NNN__YYYY-MM-DD_HHMMSS.ext
                 apt = _zip_safe_part(m.apartment.number)
                 stamp = m.captured_at.strftime('%Y-%m-%d_%H%M%S') if m.captured_at else 'sin_fecha'
                 ext = (os.path.splitext(m.photo.name)[1] or '.jpg').lower()
-                base = f'{building}/{tower}/Depto-{apt}__{stamp}'
+                base = f'{building_dir}/{tower_dir}/{floor_dir}/Depto-{apt}__{stamp}'
                 full = f'{base}{ext}'
                 n = 2
                 while full in used_names:
