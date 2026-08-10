@@ -5,6 +5,8 @@ import re
 import zipfile
 from datetime import timedelta
 
+from django.db.models import Count, Q
+from django.db.models.functions import TruncMonth
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -84,7 +86,18 @@ class MeasurementViewSet(viewsets.ModelViewSet):
 
     DELETE es eliminación lógica (30 días en papelera). Ver acciones `trash` y `restore`.
     """
-    filterset_fields = ['status', 'meter_type', 'apartment', 'apartment__tower', 'operator']
+    # Forma de diccionario para habilitar lookups por fecha además de los exactos.
+    # `captured_at__year` y `captured_at__month` permiten que el panel pida solo el
+    # mes en curso (mucho más rápido que descargar todo el histórico).
+    filterset_fields = {
+        'status': ['exact'],
+        'meter_type': ['exact'],
+        'apartment': ['exact'],
+        'apartment__tower': ['exact'],
+        'operator': ['exact'],
+        'cycle': ['exact'],
+        'captured_at': ['year', 'month', 'gte', 'lte'],
+    }
     search_fields = ['apartment__number', 'apartment__meter_id', 'apartment__qr_code']
     ordering_fields = ['captured_at', 'reading_value', 'created_at']
 
@@ -130,6 +143,75 @@ class MeasurementViewSet(viewsets.ModelViewSet):
         if page is not None:
             return self.get_paginated_response(ser.data)
         return Response(ser.data)
+
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path='summary',
+        permission_classes=[IsAdminUser],
+    )
+    def summary(self, request):
+        """
+        Agregados para el Dashboard sin descargar todas las filas.
+
+        El panel ahora carga solo el mes en curso en la tabla de mediciones; este
+        endpoint provee los totales/tendencias que el Dashboard necesita ver de
+        todo el histórico (conteos por estado, últimos 6 meses, etc.).
+        """
+        base = _measurement_base_queryset(request.user).filter(deleted_at__isnull=True)
+
+        # Conteos por estado (toda la organización, no solo el mes visible).
+        status_counts = {row['status']: row['n'] for row in base.values('status').annotate(n=Count('id'))}
+
+        # Validadas en los últimos 30 días (usa validated_at; si falta, captured_at).
+        cutoff = timezone.now() - timedelta(days=30)
+        verified_last_30 = (
+            base.filter(status=Measurement.Status.VERIFIED)
+            .filter(Q(validated_at__gte=cutoff) | Q(validated_at__isnull=True, captured_at__gte=cutoff))
+            .count()
+        )
+
+        # Mediciones por mes, últimos 6 meses (incluye meses sin datos como 0).
+        months = 6
+        now = timezone.localtime()
+        first_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        anchor = first_of_month.year * 12 + (first_of_month.month - 1)
+        start_anchor = anchor - (months - 1)
+        start_year, start_month0 = divmod(start_anchor, 12)
+        period_start = first_of_month.replace(year=start_year, month=start_month0 + 1)
+
+        rows = (
+            base.filter(captured_at__gte=period_start)
+            .annotate(m=TruncMonth('captured_at'))
+            .values('m')
+            .annotate(n=Count('id'))
+        )
+        counts_by_ym = {}
+        for row in rows:
+            m = row['m']
+            if m is not None:
+                counts_by_ym[(m.year, m.month)] = row['n']
+
+        monthly_counts = []
+        for i in range(months):
+            a = start_anchor + i
+            y, m0 = divmod(a, 12)
+            monthly_counts.append({'year': y, 'month': m0 + 1, 'count': counts_by_ym.get((y, m0 + 1), 0)})
+
+        # Últimas 5 mediciones (para la lista de actividad reciente).
+        recent = base.order_by('-captured_at')[:5]
+        recent_data = MeasurementSerializer(recent, many=True, context={'request': request}).data
+
+        return Response({
+            'status_counts': {
+                'verified': status_counts.get('verified', 0),
+                'pending_review': status_counts.get('pending_review', 0),
+                'rejected': status_counts.get('rejected', 0),
+            },
+            'verified_last_30_days': verified_last_30,
+            'monthly_counts': monthly_counts,
+            'recent': recent_data,
+        })
 
     @action(
         detail=True,
